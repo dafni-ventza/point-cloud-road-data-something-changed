@@ -12,6 +12,17 @@
 #include <string>
 #include <set>
 #include "symmetriceigensolver3x3.h"
+#include "math.h"
+#include "canvas.h"
+
+//Needed, but where? From lab 6
+//#include "Eigen/Dense"
+//#include "Eigen/Sparse"
+//#include "Eigen/SparseQR"
+//#include "Eigen/Eigenvalues"
+//#include "Eigen/SparseCholesky"
+
+
 
 #define FLAG_SHOW_AXES       1
 #define FLAG_SHOW_WIRE       2
@@ -24,6 +35,7 @@
  
 
 struct Tri;
+typedef struct randomIndices;
 
 class Mesh3DScene : public vvr::Scene
 {
@@ -32,8 +44,11 @@ public:
 	const char* getName() const { return "3D Scene"; }
 	void keyEvent(unsigned char key, bool up, int modif) override;
 	void arrowEvent(vvr::ArrowDir dir, int modif) override;
+	void mouseWheel(int dir, int modif) override;
 	//void load_point_cloud();
 	void load_point_cloud_comparison();
+	void Task1a();
+	void Task1b();
 
 private:
 	void draw() override;
@@ -56,10 +71,15 @@ private:
 	math::Plane m_plane;
 	std::vector<int> m_intersections;
 	std::vector<vec> point_cloud, point_cloud16, point_cloud20;
-	 
+	int subfoldersIndex, fileIndex;
+	math::float3 allXvalues;
+	double xValues[2], yValues[2];
 
 private:
 	void processPoint(C2DPoint* const p);
+	void readUserInput();
+
+	randomIndices generateRandomIndicesPair();
 
 private:
 	
@@ -69,9 +89,14 @@ private:
 	float m_lw_tris;
 	float m_sz_pt;
 	bool m_run_task_3, m_run_task_4, m_run_task_5;
-	C2DPoint* point_pressed;
-
+	
 };
+
+
+struct randomIndices {
+	int index1, index2;
+};
+
 /**
 * Struct representing a triangle with pointers to its 3 vertices
 */
@@ -103,6 +128,9 @@ struct Tri
 		else if (v3 != other.v3) return v3 < other.v3;
 	}
 };
+
+
+
 
 //C2DCircle GetCircumCircle(const C2DTriangle &t);
 //
