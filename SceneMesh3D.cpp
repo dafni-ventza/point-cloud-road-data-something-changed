@@ -11,11 +11,25 @@
 #include <opencv2/imgproc/types_c.h>
 #include <opencv2/imgcodecs/imgcodecs.hpp>
 #include <opencv2/core/core.hpp>
-
+#include <chrono>
 
 
 #define SPLIT_INSTEAD_OF_INTERSECT 1
-#define FLAG_SHOW_CANVAS 1
+
+
+using namespace std::chrono;
+
+#define DIMENSIONS 3
+//Those were default from lab5 - maybe change?
+#define SEC_PER_FLOOR 10
+#define GND_WIDTH 40
+#define GND_TOP 10
+#define GND_BOTTOM -10
+#define GND_DEPTH 10
+#define SPHERE_RAD 0.5
+#define POINT_SIZE 6
+#define AUTOPLAY false
+
 
 using namespace std;
 using namespace vvr;
@@ -26,8 +40,8 @@ Mesh3DScene::Mesh3DScene()
 {	
 	
 	//! Load settings.
-	vvr::Shape::DEF_LINE_WIDTH = 4;
-	vvr::Shape::DEF_POINT_SIZE = 3;
+	vvr::Shape::DEF_LINE_WIDTH = 1;
+	vvr::Shape::DEF_POINT_SIZE = 4;
 	m_perspective_proj = true;
 	m_bg_col = Colour("768E77");
 	
@@ -36,55 +50,19 @@ Mesh3DScene::Mesh3DScene()
 	m_lw_tris = 3;
 	m_sz_pt = 4;
 
+	
+	
+	
+	m_hide_log = false;
+	m_hide_sliders = true;
+	m_fullscreen = true;
+	if (AUTOPLAY) m_anim.update(true);
+	m_KDTree = NULL;
+
 	reset();
 }
 
 
-//load_point_cloud
-// void Mesh3DScene::load_point_cloud() {
-// 
-//	// load point cloud
-//	const string pcldir = getBasePath() + "resources/extracted_las_files/0_5D4KVPBP/2016/";
-//	
-//	vector<std::string> pclFiles;
-//	//Number of point cloud bin files in the folder
-//	const size_t numberOfFiles = 11;
-//
-//	for (size_t i = 0; i < 1; i++)
-//	{
-//		pclFiles.push_back(pcldir + "0_5D4KVPBP_" + to_string(i) + "_rgb_d.bin");
-//
-//		vec cm(0, 0, 0);
-//		fstream input(pclFiles[i].c_str(), ios::in | ios::binary);
-//		if (!input.good()) {
-//			cerr << "Could not read file: " << pclFiles[i] << endl;
-//			exit(EXIT_FAILURE);
-//		}
-//		input.seekg(0, ios::beg);
-//		int j;
-//		for (j = 0; input.good() && !input.eof(); j++) {
-//			vec point;
-//			float intensity;
-//			input.read((char *)&point.x, 3 * sizeof(float));
-//			input.read((char *)&intensity, sizeof(float));
-//			cm += point;
-//			point_cloud.push_back(point);
-//		}
-//		input.close();
-//	}
-//	
-//
-//	
-//	///You can also work with the point of interest
-//	///for something changed remove comments
-//	//cm/=point_cloud.size();
-//	//for (int i=0;i<point_cloud.size();i++) {
-//	  //    point_cloud[i][0]=point_cloud[i][0]-cm[0];
-//	    //  point_cloud[i][1]=point_cloud[i][1]-cm[1];
-//		  //point_cloud[i][2]=point_cloud[i][2]-cm[2];
-//
-////    }
-//}
 
 void Mesh3DScene::readUserInput() {
 	
@@ -219,7 +197,7 @@ void Mesh3DScene::load_point_cloud_comparison() {
 	for (size_t i = 0; input16.good() && !input16.eof(); i++) {
 		vec point;
 		float intensity;
-		input16.read((char *)&point.x, 3 * sizeof(float));
+		input16.read((char *)&point, 3 * sizeof(float));
 		input16.read((char *)&intensity, sizeof(float));
 		cm16 += point;
 		point_cloud16.push_back(point);
@@ -374,6 +352,10 @@ void Mesh3DScene::Task1a()
 	for (size_t t = 0; t < point_cloud16.size(); t++) {
 		if (point_cloud16[t].z < Q1_16.z || point_cloud16[t].z > Q3_16.z) {
 			point_cloud16.pop_back();
+			
+			//deleting from a vector the t-th element
+			//point_cloud16.erase(point_cloud16.begin() + (t - 1));
+
 			counter++;
 		}
 	}
@@ -579,17 +561,17 @@ void Mesh3DScene::Task1b()
 }
 
 
-randomIndices Mesh3DScene::generateRandomIndicesPair() {
-	
-	randomIndices s;
-	s.index1 = rand() % (point_cloud16.size() - 1);
-	s.index2 = rand() % (point_cloud16.size() - 1);
-	while (s.index1 == s.index2) {
-		s.index2 = rand() % (point_cloud16.size() - 1);
-	}
-
-	return s;
-}
+//randomIndices Mesh3DScene::generateRandomIndicesPair() {
+//	
+//	randomIndices s;
+//	s.index1 = rand() % (point_cloud16.size() - 1);
+//	s.index2 = rand() % (point_cloud16.size() - 1);
+//	while (s.index1 == s.index2) {
+//		s.index2 = rand() % (point_cloud16.size() - 1);
+//	}
+//
+//	return s;
+//}
 
 void Mesh3DScene::reset()
 {
@@ -609,11 +591,55 @@ void Mesh3DScene::reset()
 	
 
 	//for working with canvas and triangulization process
-	m_style_flag |= FLAG_SHOW_CANVAS;
 	m_canvas.clear();
 	m_triangles.clear();
 	m_pts.DeleteAll();
 
+	m_kn = 10;
+	m_current_tree_level = 0;
+
+	//! Position camera
+	//auto pos = getFrustum().Pos();
+	//pos.y += 20;
+	//pos.z -= 40;
+	//setCameraPos(pos);
+
+	//! Define what will be vissible by default
+	m_flag = 0;
+	m_flag |= FLAG(SHOW_NN);
+	m_flag |= FLAG(SHOW_PTS_KDTREE);
+	m_flag |= FLAG(SHOW_KDTREE);
+	m_flag |= FLAG(SHOW_PTS_ALL);
+	m_flag |= FLAG(SHOW_PTS_IN_SPHERE);
+	m_flag |= FLAG(BRUTEFORCE);
+	m_flag |= FLAG(SHOW_TIME);
+
+	//! Define scene objects
+	m_sphere = vvr::Sphere3D(-GND_WIDTH / 2, 0, 0, SPHERE_RAD, vvr::Colour::white);
+
+	//! Create random points
+	const float mw = getSceneWidth() * 0.3;
+	const float mh = getSceneHeight() * 0.3;
+	const float mz = std::min(mw, mh);
+
+	//if (FLAG_ON(m_flag, POINTS_ON_SURFACE)) {
+	//	createSurfacePts(m_pts.empty() ? NUM_PTS_DEFAULT : m_pts.size());
+	//}
+	//else {
+	//	createRandomPts(m_pts.empty() ? NUM_PTS_DEFAULT : m_pts.size());
+	//}
+
+	delete m_KDTree;
+	
+	//m_pts in Lab5 vs m_pts in point cloud appalaktiki different types, what's that???
+	m_KDTree = new KDTree(m_pts);
+	m_tree_invalidation_sec = -1;
+
+	//! Reset animation
+	m_anim.setTime(0);
+
+	//Taken from triangulization lab
+	//scene vs viewport
 	const int W = getViewportWidth() * 0.9;
 	const int H = getViewportHeight()  * 0.9;
 
@@ -648,6 +674,23 @@ void Mesh3DScene::resize()
 }
 
 
+void Mesh3DScene::printKeyboardShortcuts()
+{
+	std::cout << "Keyboard shortcuts:"
+		<< std::endl << "'?' => This shortcut list:"
+		<< std::endl << "'b' => BRUTEFORCE"
+		<< std::endl << "'n' => SHOW_NN"
+		<< std::endl << "'k' => SHOW_KNN"
+		<< std::endl << "'f' => SHOW_FPS"
+		<< std::endl << "'a' => SHOW_AXES"
+		<< std::endl << "'s' => SHOW_SPHERE"
+		<< std::endl << "'t' => SHOW_KDTREE"
+		<< std::endl << "'p' => SHOW_PTS_ALL"
+		<< std::endl << "'d' => SHOW_PTS_KDTREE"
+		<< std::endl << "'c' => SHOW_PTS_IN_SPHERE"
+		<< std::endl << "'u' => POINTS_ON_SURFACE"
+		<< std::endl << std::endl;
+}
 
 
 
@@ -668,6 +711,20 @@ void Mesh3DScene::arrowEvent(ArrowDir dir, int modif)
 		m_model = Mesh(m_model_original);
 		 
 	}
+
+	//From Lab5
+	if (dir == vvr::UP)
+	{
+		++m_current_tree_level;
+		if (m_current_tree_level > m_KDTree->depth())
+			m_current_tree_level = m_KDTree->depth();
+	}
+	else if (dir == vvr::DOWN)
+	{
+		--m_current_tree_level;
+		if (m_current_tree_level < 0)
+			m_current_tree_level = 0;
+	}
 }
 
 
@@ -681,11 +738,23 @@ void Mesh3DScene::keyEvent(unsigned char key, bool up, int modif)
 	{
 	case 's': m_style_flag ^= FLAG_SHOW_SOLID; break;
 	case 'w': m_style_flag ^= FLAG_SHOW_WIRE; break;
-	case 'n': m_style_flag ^= FLAG_SHOW_NORMALS; break;
-	case 'a': m_style_flag ^= FLAG_SHOW_AXES; break;
-	case 'p': m_style_flag ^= FLAG_SHOW_PLANE; break;
-	case 'b': m_style_flag ^= FLAG_SHOW_AABB; break;
-	/*case 'y': load_cv_test(); break;*/
+	//case 'n': m_style_flag ^= FLAG_SHOW_NORMALS; break;
+	
+	case 'u': m_style_flag ^= FLAG_SHOW_PLANE; break;
+	//case 'b': m_style_flag ^= FLAG_SHOW_AABB; break;
+
+
+		FLAG_TOGGLE(m_flag, 'b', BRUTEFORCE);
+		FLAG_TOGGLE(m_flag, 'n', SHOW_NN);
+		FLAG_TOGGLE(m_flag, 'k', SHOW_KNN);
+		FLAG_TOGGLE(m_flag, 'f', SHOW_FPS);
+		FLAG_TOGGLE(m_flag, 'a', SHOW_AXES);
+		FLAG_TOGGLE(m_flag, 't', SHOW_KDTREE);
+		FLAG_TOGGLE(m_flag, 'p', SHOW_PTS_ALL);
+		FLAG_TOGGLE(m_flag, 'd', SHOW_PTS_KDTREE);
+		FLAG_TOGGLE(m_flag, 'c', SHOW_PTS_IN_SPHERE);
+		/*FLAG_TOGGLE(m_flag, 'r', POINTS_ON_SURFACE);*/
+		FLAG_TOGGLE(m_flag, 'o', SHOW_TIME);
 	}
 }
 
@@ -706,14 +775,15 @@ void Mesh3DScene::mouseWheel(int dir, int modif)
 void Mesh3DScene::Tasks()
 {
 
-	//load_point_cloud();
+
 	load_point_cloud_comparison();
-	Task1a();
-	Task1b();
+	//Task1a();
+	
+	//processPoint();
 
 }
 
-void Mesh3DScene::processPoint(C2DPoint* const p)
+void Mesh3DScene::processPoint()
 {
 	
 
@@ -725,23 +795,23 @@ void Mesh3DScene::processPoint(C2DPoint* const p)
 		//! Check whether a point already exists in the same coords.
 		for (size_t i = 0; i < m_pts.size(); i++)
 		{
-			if (m_pts.GetAt(i)->x == p->x &&
-				m_pts.GetAt(i)->y == p->y)
+			if (m_pts.GetAt(i)->x == point_cloud16[i].x &&
+				m_pts.GetAt(i)->y == point_cloud16[i].x)
 			{
-				delete p;
+				delete &point_cloud16[i];
 				return;
 			}
 		}
 
 		//! Find enclosing triangle.
-		unsigned i_enclosing = -1;
+		/*unsigned i_enclosing = -1;
 		unsigned count_enclosing = 0;
 		for (int i = 0; i < m_triangles.size(); i++) {
-			if (m_triangles[i].to_C2D().Contains(*p)) {
+			if (m_triangles[i].to_C2D().Contains(point_cloud16[i])) {
 				count_enclosing++;
 				i_enclosing = i;
 			}
-		}
+		}*/
 
 		////! [Check 2]
 		////! If no enclosing triangle was found.
@@ -754,7 +824,7 @@ void Mesh3DScene::processPoint(C2DPoint* const p)
 		//m_pts.Add(p);
 
 		// The enclosing triangle
-		Tri &tri_enclosing = m_triangles[i_enclosing];
+		//Tri &tri_enclosing = m_triangles[i_enclosing];
 
 		//!//////////////////////////////////////////////////////////////////////////////////
 		//! TASK 0:
@@ -782,23 +852,23 @@ void Mesh3DScene::processPoint(C2DPoint* const p)
 		C2DPoint *p2 = m_triangles[i_enclosing].v2;
 		C2DPoint *p3 = m_triangles[i_enclosing].v3;*/
 
-		p->x = point_cloud16[0].x;
-		p->y = point_cloud16[0].y;
-		//p->z = point_cloud16[0].y;
+		//p->x = point_cloud16[0].x;
+		//p->y = point_cloud16[0].y;
+		////p->z = point_cloud16[0].y;
 
-		C2DPoint *p1 = m_triangles[i_enclosing].v1;
-		C2DPoint *p2 = m_triangles[i_enclosing].v2;
-		C2DPoint *p3 = m_triangles[i_enclosing].v3;
+		//C2DPoint *p1 = m_triangles[i_enclosing].v1;
+		//C2DPoint *p2 = m_triangles[i_enclosing].v2;
+		//C2DPoint *p3 = m_triangles[i_enclosing].v3;
 
-		new_triangles.push_back(Tri(p, p1, p2, vvr::Colour::red));
-		new_triangles.push_back(Tri(p, p1, p3, vvr::Colour::red));
-		new_triangles.push_back(Tri(p, p2, p3, vvr::Colour::red));
+		//new_triangles.push_back(Tri(p, p1, p2, vvr::Colour::red));
+		//new_triangles.push_back(Tri(p, p1, p3, vvr::Colour::red));
+		//new_triangles.push_back(Tri(p, p2, p3, vvr::Colour::red));
 
-		/// erase i_enclosing triangle from m_triangles
-		m_triangles.erase(m_triangles.begin() + i_enclosing);
+		///// erase i_enclosing triangle from m_triangles
+		//m_triangles.erase(m_triangles.begin() + i_enclosing);
 
-		// add new_triangles to m_triangles
-		m_triangles.insert(m_triangles.end(), new_triangles.begin(), new_triangles.end());
+		//// add new_triangles to m_triangles
+		//m_triangles.insert(m_triangles.end(), new_triangles.begin(), new_triangles.end());
 
 
 		//!//////////////////////////////////////////////////////////////////////////////////
@@ -849,24 +919,26 @@ void Mesh3DScene::processPoint(C2DPoint* const p)
 void Mesh3DScene::draw()
 {
 	
+	const float POINT_SIZE_SAVE = vvr::Shape::DEF_POINT_SIZE;
 
 	//! Draw violations and anything else added to canvas
-	if (m_style_flag & FLAG_SHOW_CANVAS) {
+	/*if (m_style_flag & FLAG_SHOW_CANVAS) {
 		Shape::DEF_LINE_WIDTH = m_lw_canvas;
 		m_canvas.draw();
-	}
+	}*/
 
 	//! Draw triangles
 	Shape::DEF_LINE_WIDTH = m_lw_tris;
 
-	vector<Tri>::const_iterator tri_iter;
+	//for triangulization - need to adjust
+	/*vector<Tri>::const_iterator tri_iter;
 	for (tri_iter = m_triangles.begin(); tri_iter != m_triangles.end(); ++tri_iter) {
 		tri_iter->to_vvr().draw();
 	}
-
-	//! Draw points
-	Shape::DEF_POINT_SIZE = m_sz_pt;
-	vvr::draw(m_pts, Colour::yellow);
+*/
+	////! Draw any point
+	//Shape::DEF_POINT_SIZE = m_sz_pt;
+	//vvr::draw(m_pts, Colour::yellow);
 
 	//! Draw point clouds
 	for (int i = 0; i < point_cloud16.size(); i++) {
@@ -878,39 +950,289 @@ void Mesh3DScene::draw()
 
 	//draw for RANSAC
 	// SOMETHING'S NOT NICE....
-	Line2D(xValues[0], yValues[0], xValues[1], yValues[1], vvr::Colour::green).draw();
-	vvr::Colour colPlane(0x0f, 0xf1, 0xce);
-	float u = 55, v = 55;
-	math::vec pp0(m_plane.Point(-u, -v, math::vec(xValues[0], xValues[1], yValues[1])));
-	math::vec pp1(m_plane.Point(-u, v, math::vec(xValues[0], xValues[1], yValues[0])));
-	math::vec pp2(m_plane.Point(u, -v, math::vec(yValues[0], xValues[1], yValues[1])));
-	math::vec pp3(m_plane.Point(u, v, math::vec(yValues[0], yValues[1], xValues[0])));
-	//SEE THE TRIANGLES I DRAW
-	math2vvr(math::Triangle(pp0, pp1, pp2), colPlane).draw();
-	math2vvr(math::Triangle(pp2, pp0, pp3), colPlane).draw();
+	//Line2D(xValues[0], yValues[0], xValues[1], yValues[1], vvr::Colour::green).draw();
+	//vvr::Colour colPlane(0x0f, 0xf1, 0xce);
+	//float u = 55, v = 55;
+	//math::vec pp0(m_plane.Point(-u, -v, math::vec(xValues[0], xValues[1], yValues[1])));
+	//math::vec pp1(m_plane.Point(-u, v, math::vec(xValues[0], xValues[1], yValues[0])));
+	//math::vec pp2(m_plane.Point(u, -v, math::vec(yValues[0], xValues[1], yValues[1])));
+	//math::vec pp3(m_plane.Point(u, v, math::vec(yValues[0], yValues[1], xValues[0])));
+	////SEE THE TRIANGLES I DRAW
+	//math2vvr(math::Triangle(pp0, pp1, pp2), colPlane).draw();
+	//math2vvr(math::Triangle(pp2, pp0, pp3), colPlane).draw();
 
 	
 	//! Draw plane
-	if (m_style_flag & FLAG_SHOW_PLANE) {
-		vvr::Colour colPlane(0x0f, 0xf1, 0xce);
-		//WXH for the plane - increase?
-		float u = 10, v = 10;
-		math::vec p0(m_plane.Point(-u, -v, math::vec(0, 0, 0)));
-		math::vec p1(m_plane.Point(-u, v, math::vec(0, 0, 0)));
-		math::vec p2(m_plane.Point(u, -v, math::vec(0, 0, 0)));
-		math::vec p3(m_plane.Point(u, v, math::vec(0, 0, 0)));
-		math2vvr(math::Triangle(p0, p1, p2), colPlane).draw();
-		math2vvr(math::Triangle(p2, p1, p3), colPlane).draw();
-	}
+	//if (m_style_flag & FLAG_SHOW_PLANE) {
+	//	vvr::Colour colPlane(0x0f, 0xf1, 0xce);
+	//	//WXH for the plane - increase?
+	//	float u = 10, v = 10;
+	//	math::vec p0(m_plane.Point(-u, -v, math::vec(0, 0, 0)));
+	//	math::vec p1(m_plane.Point(-u, v, math::vec(0, 0, 0)));
+	//	math::vec p2(m_plane.Point(u, -v, math::vec(0, 0, 0)));
+	//	math::vec p3(m_plane.Point(u, v, math::vec(0, 0, 0)));
+	//	math2vvr(math::Triangle(p0, p1, p2), colPlane).draw();
+	//	math2vvr(math::Triangle(p2, p1, p3), colPlane).draw();
+	//}
 
-	if (m_style_flag & FLAG_SHOW_SOLID) m_model.draw(m_obj_col, SOLID);
+	/*if (m_style_flag & FLAG_SHOW_SOLID) m_model.draw(m_obj_col, SOLID);
 	if (m_style_flag & FLAG_SHOW_WIRE) m_model.draw(Colour::black, WIRE);
 	if (m_style_flag & FLAG_SHOW_NORMALS) m_model.draw(Colour::black, NORMALS);
-	if (m_style_flag & FLAG_SHOW_AXES) m_model.draw(Colour::black, AXES);
+	if (m_style_flag & FLAG_SHOW_AXES) m_model.draw(Colour::black, AXES);*/
 
+	//from lab5
+	//! Find and Draw Nearest Neighbour
+
+	if (FLAG_ON(m_flag, SHOW_NN)) {
+		float dist;
+		const KDNode *nearest = NULL;
+
+		//!!!! COPY PASTE FROM MY YEAR THE TASK 02 AND UNCOMMENT BELOW
+	/*	Task_02_Nearest(sc, m_KDTree->root(), &nearest, &dist);
+
+		vec nn = nearest->split_point;
+		vvr::Shape::DEF_POINT_SIZE = vvr::Shape::DEF_POINT_SIZE = POINT_SIZE;
+		math2vvr(sc, vvr::Colour::blue).draw();
+		math2vvr(nn, vvr::Colour::green).draw();
+		vvr::Shape::DEF_POINT_SIZE = POINT_SIZE_SAVE;*/
+	}
+
+	//! Find and Draw K Nearest Neighbour using bruteforce
+	if (FLAG_ON(m_flag, SHOW_KNN) && FLAG_ON(m_flag, BRUTEFORCE)) {
+		vec *nearests = new vec[m_KDTree->pts.size()];
+		double* allDistances = new double[m_KDTree->pts.size()];
+		memset(nearests, NULL, m_KDTree->pts.size() * sizeof(vec));
+
+		/*for (int i = 0; i < m_KDTree->pts.size(); i++) {
+			*(nearests + i) = m_KDTree->pts[i];
+			allDistances[i] = sc.Distance(m_KDTree->pts[i]);
+		}
+
+		int *indices = new int[m_KDTree->pts.size()];
+		for (int i = 0; i < m_KDTree->pts.size(); i++) {
+			*(indices + i) = i;
+		}
+		std::sort(indices, indices + m_KDTree->pts.size(), compare(allDistances));
+		for (int i = 0; i < m_kn; i++) {
+			vec nn = m_KDTree->pts[*(indices + i)];
+			vvr::Shape::DEF_POINT_SIZE = vvr::Shape::DEF_POINT_SIZE = POINT_SIZE;
+			math2vvr(sc, vvr::Colour::blue).draw();
+			math2vvr(nn, vvr::Colour::green).draw();
+			vvr::Shape::DEF_POINT_SIZE = POINT_SIZE_SAVE;
+		}*/
+
+		delete[] nearests;
+		//delete[] indices;
+	}
+
+	//! Find and Draw K Nearest Neighbour using recursion
+	if (FLAG_ON(m_flag, SHOW_KNN) && !FLAG_ON(m_flag, BRUTEFORCE)) {
+		float dist;
+		const KDNode **nearests = new const KDNode*[m_kn];
+		memset(nearests, NULL, m_kn * sizeof(KDNode*));
+
+		for (int i = 0; i < m_kn; i++) {
+			Task_04_NearestK(i, sc, m_KDTree->root(), nearests, &dist);
+		}
+
+		for (int i = 0; i < m_kn; i++) {
+			if (!nearests[i]) continue;
+			vec nn = nearests[i]->split_point;
+			vvr::Shape::DEF_POINT_SIZE = vvr::Shape::DEF_POINT_SIZE = POINT_SIZE;
+			math2vvr(sc, vvr::Colour::blue).draw();
+			math2vvr(nn, vvr::Colour::green).draw();
+			vvr::Shape::DEF_POINT_SIZE = POINT_SIZE_SAVE;
+		}
+		delete[] nearests;
+	}
+
+	//! Draw KDTree
+	if (FLAG_ON(m_flag, SHOW_KDTREE)) {
+		for (int level = m_current_tree_level; level <= m_current_tree_level; level++) {
+			std::vector<KDNode*> levelNodes = m_KDTree->getNodesOfLevel(level);
+			for (int i = 0; i < levelNodes.size(); i++) {
+				if (m_flag & FLAG(SHOW_PTS_KDTREE)) {
+					VecArray pts;
+					Task_01_FindPtsOfNode(levelNodes[i], pts);
+					vvr::Shape::DEF_POINT_SIZE = vvr::Shape::DEF_POINT_SIZE = POINT_SIZE;
+					for (int pi = 0; pi < pts.size(); pi++) {
+						math2vvr(pts[pi], Pallete[i % 6]).draw();
+					}
+					vvr::Shape::DEF_POINT_SIZE = POINT_SIZE_SAVE;
+				}
+				vec c1 = levelNodes[i]->aabb.minPoint - math::vec(0.1);
+				vec c2 = levelNodes[i]->aabb.maxPoint + math::vec(0.1);
+				vvr::Box3D box(c1.x, c1.y, c1.z, c2.x, c2.y, c2.z);
+				box.setTransparency(0.9);
+				box.setColour(vvr::Colour::cyan);
+				box.draw();
+			}
+		}
+	}
+
+	//! Compute & Display FPS
+	static float last_update = 0;
+	static float last_show = 0;
+	const float sec = vvr::getSeconds();
+	const float dt = sec - last_update;
+	const float dt_show = sec - last_show;
+	int FPS = 1.0 / dt;
+	last_update = sec;
+	if (FLAG_ON(m_flag, SHOW_FPS) && dt_show >= 1) {
+		echo(FPS);
+		last_show = sec;
+	}
 
 }
  
+//! KDTree::
+
+KDTree::KDTree(VecArray &pts)
+	: pts(pts)
+{
+	const float t = vvr::getSeconds();
+	m_root = new KDNode();
+	m_depth = makeNode(m_root, pts, 0);
+	const float KDTree_construction_time = vvr::getSeconds() - t;
+	echo(KDTree_construction_time);
+	echo(m_depth);
+}
+
+KDTree::~KDTree()
+{
+	const float t = vvr::getSeconds();
+	delete m_root;
+	const float KDTree_destruction_time = vvr::getSeconds() - t;
+	echo(KDTree_destruction_time);
+}
+
+int KDTree::makeNode(KDNode *node, VecArray &pts, const int level)
+{
+	//! Sort along the appropriate axis, find median point and split.
+	const int axis = level % DIMENSIONS;
+	std::sort(pts.begin(), pts.end(), VecComparator(axis));
+	const int i_median = pts.size() / 2;
+
+	//! Set node members
+	node->level = level;
+	node->axis = axis;
+	node->split_point = pts[i_median];
+	node->aabb.SetFrom(&pts[0], pts.size());
+
+	//! Continue recursively or stop.
+	if (pts.size() <= 1)
+	{
+		return level;
+	}
+	else
+	{
+		int level_left = 0;
+		int level_right = 0;
+		VecArray pts_left(pts.begin(), pts.begin() + i_median);
+		VecArray pts_right(pts.begin() + i_median + 1, pts.end());
+
+		if (!pts_left.empty())
+		{
+			node->child_left = new KDNode();
+			level_left = makeNode(node->child_left, pts_left, level + 1);
+
+		}
+		if (!pts_right.empty())
+		{
+			node->child_right = new KDNode();
+			level_right = makeNode(node->child_right, pts_right, level + 1);
+		}
+
+		int max_level = std::max(level_left, level_right);
+		return max_level;
+	}
+}
+
+//Tasks from lab5 on KDTrees
+void Task_01_FindPtsOfNode(const KDNode* root, VecArray &pts)
+{
+	pts.push_back(root->split_point);
+
+	if (root->child_left) {
+		Task_01_FindPtsOfNode(root->child_left, pts);
+
+	}
+
+	if (root->child_right) {
+
+		Task_01_FindPtsOfNode(root->child_right, pts);
+	}
+
+
+}
+
+void Task_02_Nearest(const vec& test_pt, const KDNode* root, const KDNode **nn, float *best_dist)
+{
+	if (!root)
+		return;
+
+	const double d = test_pt.Distance(root->split_point);
+	const double d_split = root->split_point.ptr()[root->axis] - test_pt.ptr()[root->axis];
+	const bool right_of_split = d_split <= 0;
+
+	if (*nn == NULL || d < *best_dist) {
+		*best_dist = d;
+		*nn = root;
+	}
+
+	//searching
+	Task_02_Nearest(test_pt, right_of_split ? root->child_right : root->child_left, nn, best_dist);
+
+	//pruning
+	if (d_split * d_split >= *best_dist) return;
+
+	Task_02_Nearest(test_pt, right_of_split ? root->child_left : root->child_right, nn, best_dist);
+
+
+}
+
+void Task_03_InSphere(const Sphere &sphere, const KDNode *root, VecArray &pts)
+{
+	if (!root)
+		return;
+
+	const double d = sphere.pos.DistanceSq(root->split_point);
+	const double d_split = root->split_point.ptr()[root->axis] - sphere.pos.ptr()[root->axis];
+	const bool right_of_split = d_split <= 0;
+
+	if (d < sphere.r * sphere.r) {
+		pts.push_back(root->split_point);
+	}
+
+	Task_03_InSphere(sphere, right_of_split ? root->child_right : root->child_left, pts);
+
+	//pruning
+	if (d_split * d_split > sphere.r* sphere.r)return;
+
+	Task_03_InSphere(sphere, right_of_split ? root->child_left : root->child_right, pts);
+}
+
+void KDTree::getNodesOfLevel(KDNode *node, std::vector<KDNode*> &nodes, int level)
+{
+	if (!level)
+	{
+		nodes.push_back(node);
+	}
+	else
+	{
+		if (node->child_left) getNodesOfLevel(node->child_left, nodes, level - 1);
+		if (node->child_right) getNodesOfLevel(node->child_right, nodes, level - 1);
+	}
+}
+
+std::vector<KDNode*> KDTree::getNodesOfLevel(const int level)
+{
+	std::vector<KDNode*> nodes;
+	if (!m_root) return nodes;
+	getNodesOfLevel(m_root, nodes, level);
+	return nodes;
+}
+
 int main(int argc, char* argv[])
 {
 	try {
@@ -926,5 +1248,6 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 }
+
 
  

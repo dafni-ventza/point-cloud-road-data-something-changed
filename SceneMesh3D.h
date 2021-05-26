@@ -23,6 +23,13 @@
 //#include "Eigen/SparseCholesky"
 
 
+//! MACROS used for toggling and testing bitwise flags.
+#define FLAG(x) (1<<(x))
+#define FLAG_ON(v,f) (v & FLAG(f))
+#define FLAG_TOGGLE(v,c,f) case c: v ^= FLAG(f); std::cout \
+    << #f << " = " << (FLAG_ON(v,f) ? "ON" : "OFF") \
+    << std::endl; break
+
 
 #define FLAG_SHOW_AXES       1
 #define FLAG_SHOW_WIRE       2
@@ -31,21 +38,75 @@
 #define FLAG_SHOW_PLANE     16
 #define FLAG_SHOW_AABB      32
 
- 
- 
+//From KD Trees lab (5)
+/**
+ * Array with 6 predefined colours.
+ */
+static const vvr::Colour Pallete[6] = {
+	vvr::Colour::red, vvr::Colour::green, vvr::Colour::blue, vvr::Colour::magenta,
+	vvr::Colour::orange, vvr::Colour::yellow,
+};
 
+/**
+ * A node of a KD-Tree
+ */
+struct KDNode
+{
+	vec split_point;
+	int axis;
+	int level;
+	AABB aabb;
+	KDNode *child_left;
+	KDNode *child_right;
+	KDNode() : child_left(NULL), child_right(NULL) {}
+	~KDNode() { delete child_left; delete child_right; }
+};
+
+//......
 struct Tri;
 typedef struct randomIndices;
 
+
+/**
+ * KD-Tree wrapper. Holds a ptr to tree root.
+ */
+class KDTree
+{
+public:
+	KDTree(VecArray &pts);
+	~KDTree();
+	std::vector<KDNode*> getNodesOfLevel(int level);
+	int depth() const { return m_depth; }
+	const KDNode* root() const { return m_root; }
+	const VecArray &pts;
+
+private:
+	static int makeNode(KDNode *node, VecArray &pts, const int level);
+	static void getNodesOfLevel(KDNode *node, std::vector<KDNode*> &nodes, int level);
+
+private:
+	KDNode *m_root;
+	int m_depth;
+};
+
+//Scene - declarations, members, functions etc
 class Mesh3DScene : public vvr::Scene
 {
+
+	enum {
+		BRUTEFORCE, POINTS_ON_SURFACE, SHOW_AXES, SHOW_FPS, SHOW_NN, SHOW_KNN, SHOW_SPHERE,
+		SHOW_KDTREE, SHOW_PTS_ALL, SHOW_PTS_KDTREE,
+		SHOW_PTS_IN_SPHERE, SHOW_TIME
+	};
+
 public:
 	Mesh3DScene();
 	const char* getName() const { return "3D Scene"; }
 	void keyEvent(unsigned char key, bool up, int modif) override;
 	void arrowEvent(vvr::ArrowDir dir, int modif) override;
 	void mouseWheel(int dir, int modif) override;
-	//void load_point_cloud();
+	void printKeyboardShortcuts();
+
 	void load_point_cloud_comparison();
 	void Task1a();
 	void Task1b();
@@ -75,8 +136,20 @@ private:
 	math::float3 allXvalues;
 	double xValues[2], yValues[2];
 
+	//From KD Trees Lab5
+	KDTree *m_KDTree;
+	VecArray m_pts;
+	vvr::Sphere3D m_sphere;
+	vvr::Animation m_anim;
+	int m_flag;
+	math::LCG m_lcg;
+	int m_current_tree_level;
+	float m_tree_invalidation_sec;
+	int m_kn;
+
 private:
-	void processPoint(C2DPoint* const p);
+	//void processPoint(C2DPoint* const p);
+	void processPoint();
 	void readUserInput();
 
 	randomIndices generateRandomIndicesPair();
@@ -129,6 +202,24 @@ struct Tri
 	}
 };
 
+
+/**
+ * Function object to compare 2 3D-vecs in the specified axis.
+ */
+struct VecComparator {
+	unsigned axis;
+	VecComparator(unsigned axis) : axis(axis % 3) {}
+	virtual inline bool operator() (const vec& v1, const vec& v2) {
+		return (v1.ptr()[axis] < v2.ptr()[axis]);
+	}
+};
+
+//! Task function prototypes
+struct compare {
+	double* values;
+	compare(double *input) : values(input) {}
+	bool operator()(int i, int j) const { return values[i] < values[j]; }
+};
 
 
 
