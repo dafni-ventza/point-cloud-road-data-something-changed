@@ -4,6 +4,7 @@
 #include <Windows.h>
 #include <stdio.h>
 #include <string.h>
+#include <omp.h>
 
 
 #include "opencv2/imgproc/imgproc.hpp"
@@ -12,12 +13,17 @@
 #include <opencv2/imgcodecs/imgcodecs.hpp>
 #include <opencv2/core/core.hpp>
 #include <chrono>
+#include <ctime>
 
 
 #define SPLIT_INSTEAD_OF_INTERSECT 1
 
 
 using namespace std::chrono;
+using namespace std;
+using namespace vvr;
+//using namespace cv;
+//using namespace Eigen;
 
 #define DIMENSIONS 3
 //Those were default from lab5 - maybe change?
@@ -31,11 +37,7 @@ using namespace std::chrono;
 #define AUTOPLAY false
 
 
-using namespace std;
-using namespace vvr;
-using namespace cv;
-
-using namespace Eigen;
+//
 
 
 int levels_calculated = 0;
@@ -218,14 +220,14 @@ void Mesh3DScene::load_point_cloud_comparison() {
 	const string pcldir16 = pclDir + subfolders[subfoldersIndex] + "/2016/";
 	
 	string strFile = to_string(fileIndex);
-	const string pclFiles16 =  pcldir16 + subfolders[subfoldersIndex]+ "_" + strFile + "_rgb_d.bin";
+	const string pclFiles16 =  pcldir16 + subfolders[subfoldersIndex]+ "_" + strFile + "_xyz_d.bin";
 
 
 	pclDir = getBasePath() + "resources/extracted_las_files/";
 	const string pcldir20 = pclDir + subfolders[subfoldersIndex] + "/2020/";
 
 	strFile = to_string(fileIndex);
-	const string pclFiles20 = pcldir16 + subfolders[subfoldersIndex] + "_" + strFile + "_rgb_d.bin";
+	const string pclFiles20 = pcldir16 + subfolders[subfoldersIndex] + "_" + strFile + "_xyz_d.bin";
 
 	//const string pcldir20 = getBasePath() + "resources/extracted_las_files/0_5D4KVPBP";
 	//const string pclFiles20 = pcldir20 + "/2020/" + "/0_5D4KVPBP_5_rgb_d.bin";
@@ -250,9 +252,9 @@ void Mesh3DScene::load_point_cloud_comparison() {
 
 	cm16 /= point_cloud16.size();
 	for (int i = 0; i < point_cloud16.size(); i++) {
-		point_cloud16[i][0] = point_cloud16[i][0] - cm16[0];
-		point_cloud16[i][1] = point_cloud16[i][1] - cm16[1];
-		point_cloud16[i][2] = point_cloud16[i][2] - cm16[2];
+		point_cloud16[i].x = point_cloud16[i].x - cm16[0];
+		point_cloud16[i].y = point_cloud16[i].y - cm16[1];
+		point_cloud16[i].z = point_cloud16[i].z - cm16[2];
 
 	}
 
@@ -276,9 +278,9 @@ void Mesh3DScene::load_point_cloud_comparison() {
 
 	cm20/= point_cloud20.size();
 	for (int i=0;i< point_cloud20.size();i++) {
-		point_cloud20[i][0]= point_cloud20[i][0]- cm20[0];
-		point_cloud20[i][1]= point_cloud20[i][1]- cm20[1];
-		point_cloud20[i][2]= point_cloud20[i][2]- cm20[2];
+		point_cloud20[i].x= point_cloud20[i].x- cm20[0];
+		point_cloud20[i].y= point_cloud20[i].y- cm20[1];
+		point_cloud20[i].z= point_cloud20[i].z- cm20[2];
 
     }	
 
@@ -286,6 +288,9 @@ void Mesh3DScene::load_point_cloud_comparison() {
 
 void Mesh3DScene::Task1a()
 {
+
+	int64_t start = cv::getTickCount();
+	
 	//2016
 	double min16X, max16X, min16Y, max16Y, min16Z, max16Z;
 	
@@ -318,8 +323,8 @@ void Mesh3DScene::Task1a()
 	
 	//2020
 
-	double min20X, max20X, min20Y, max20Y, min20Z, max20Z;
-
+	float min20X, max20X, min20Y, max20Y, min20Z, max20Z;
+	
 	min20X = point_cloud20[0][0];
 	max20X = min20X;
 
@@ -330,7 +335,7 @@ void Mesh3DScene::Task1a()
 	max20Z = min20Z;
 
 	for (int i = 0; i < point_cloud20.size(); i++) {
-
+		
 		min20X = findMin(point_cloud20[i][0], min20X);
 		max20X = findMax(point_cloud20[i][0], max20X);
 
@@ -398,6 +403,7 @@ void Mesh3DScene::Task1a()
 	//Following regarding outliers - thresholds --> https://www.youtube.com/watch?v=Pfk9tlWy500
 	//Inner Quartile Range (BOX)
 	float3 IQR16, IQR20;
+	//this is said to be always 1.5f!, affected by the dataset distribution
 	const float factorIQR = 1.5f;
 	IQR16 = (Q3_16 - Q1_16) * factorIQR;
 	IQR20 = (Q3_20 - Q1_20) * factorIQR;
@@ -421,18 +427,24 @@ void Mesh3DScene::Task1a()
 	cout << "point_cloud16.size():" << point_cloud16.size() << endl;
 	int counter = 0;
 	unsigned position16 = -1;
+	
+	//#pragma omp
+	#pragma omp parallel for
 	for (int t = 0; t < point_cloud16.size()-1; t++) {
 		//COMPARE ALL WITH ALL DIMENSIONS
-		if ((point_cloud16[t].x < Q1_16.x || point_cloud16[t].x > Q3_16.x)
-			&& (point_cloud16[t].y < Q1_16.y || point_cloud16[t].y > Q3_16.y)
-			&& (point_cloud16[t].z < Q1_16.z || point_cloud16[t].z > Q3_16.z)){
+		if ((point_cloud16[t].x < Q1_16.x && point_cloud16[t].x > Q3_16.x)
+			|| (point_cloud16[t].y < Q1_16.y && point_cloud16[t].y > Q3_16.y)
+			|| (point_cloud16[t].z < Q1_16.z && point_cloud16[t].z > Q3_16.z)){
 			//deleting from a vector the t-th element
 			//point_cloud16.erase(point_cloud16.begin() + (t - 2));
 			position16 = t;
-			cout << "position16:" << position16 << endl;
+			//cout << "position16:" << position16 << endl;
 			//deleting from a vector the t-th element
 			point_cloud16.erase(point_cloud16.begin() + position16);
+			//m_canvas.draw();
 			
+
+
 			counter++;
 		}
 	}
@@ -444,9 +456,9 @@ void Mesh3DScene::Task1a()
 	counter = 0;
 	unsigned position20 = -1;
 	for (int t = 0; t < point_cloud20.size()-1; t++) {
-		if ((point_cloud20[t].x < Q1_20.x || point_cloud20[t].x > Q3_20.x)
-			 && (point_cloud20[t].y < Q1_20.y || point_cloud20[t].y > Q3_20.y)
-			 && (point_cloud20[t].z < Q1_20.z || point_cloud20[t].z > Q3_20.z))  {
+		if ((point_cloud20[t].x < Q1_20.x && point_cloud20[t].x > Q3_20.x)
+			 || (point_cloud20[t].y < Q1_20.y && point_cloud20[t].y > Q3_20.y)
+			 || (point_cloud20[t].z < Q1_20.z && point_cloud20[t].z > Q3_20.z))  {
 			//point_cloud20.pop_back();
 			
 			//deleting from a vector the t-th element
@@ -454,7 +466,7 @@ void Mesh3DScene::Task1a()
 			//cout << "position20:" << position16 << endl;
 
 			point_cloud20.erase(point_cloud20.begin() + position20);
-			m_canvas.draw();
+			//m_canvas.draw();
 			//delete &point_cloud20[t];
 
 			counter++;
@@ -463,14 +475,19 @@ void Mesh3DScene::Task1a()
 
 	cout << "point_cloud20 removed:" << counter << endl;
 
-
+	int64_t end = cv::getTickCount();
+	std::cout << "Task1a took: " << (end - start) / (cv::getTickFrequency()) * 1000.0 << " ms." << std::endl;
 }
 
-void Mesh3DScene::Task1b()
+void Mesh3DScene::Task1b(int pointCloudSize, std::vector<vec> point_cloud)
 {
+
+	int64_t start = cv::getTickCount();
+
 	//RANSAC Implementation actually
 	double dist;
-	double A, B, C;
+	//JUST DEBUGGING - TO DO
+	double A,B,C;
 	// LINE: A*x+B*y+C=0
 	/*C2DPoint *p1, *p2;*/
 	
@@ -481,22 +498,31 @@ void Mesh3DScene::Task1b()
 	//the line with the maximum number of inliers becomes the line equation
 	double variationX = 0, variationY = 0, variationZ = 0, variation=0;
 	double sum, sumX = 0, sumY=0, sumZ=0;
-	int numPoints = point_cloud16.size();
+	int numPoints = pointCloudSize;
 	double mean;
 	int n = 0;
-	
+
+	/*cv::InputArray inputPoints = point_cloud[0];
+	cv::OutputArray outputArrangedPoints;
+
+	sort(cv::InputArray)
+	std::sort(point_cloud, point_cloud_arranged);*/
+
 	for (size_t i = 0; i < numPoints; i++)
 	{
-		sumX += point_cloud16[i].x;
-		sumY += point_cloud16[i].y;
-		sumZ += point_cloud16[i].z;
+		sumX += point_cloud[i].x;
+		sumY += point_cloud[i].y;
+		sumZ += point_cloud[i].z;
 	}
 	sum = sumX + sumY + sumZ;
 	mean = sum / numPoints;
+	
+
+	//#pragma omp parallel for
 	while (n < numPoints) {
-		variationX = variationX + (pow((point_cloud16[n].x - mean), (point_cloud16[n].x - mean))) ;
-		variationY = variationY + (pow((point_cloud16[n].y - mean), (point_cloud16[n].y - mean)));
-		variationZ = variationZ + (pow((point_cloud16[n].z - mean), (point_cloud16[n].z - mean)));
+		variationX = variationX + (pow((point_cloud[n].x - mean), (point_cloud[n].x - mean))) ;
+		variationY = variationY + (pow((point_cloud[n].y - mean), (point_cloud[n].y - mean)));
+		variationZ = variationZ + (pow((point_cloud[n].z - mean), (point_cloud[n].z - mean)));
 		n++;
 	}
 	variation = variationX + variationY + variationZ;
@@ -506,31 +532,37 @@ void Mesh3DScene::Task1b()
 
 	//test to decide
 	// numberOfIterations shouldn't be too large
-	int numberOfIterations=1000;
+	int numberOfIterations=500;
 	//tolerance is based upon the spread of the dataset
 	double tolerance = 5.0f;
 	int maxInliersCounter = 0;
 	double coefficients[3];
 
+	srand(time(NULL));
+	//#pragma omp parallel for
 	for (size_t i = 0; i < numberOfIterations; i++)
 	{
 		randomIndices s;
 		//finding two random points
-		s = generateRandomIndicesPair();
+		s = generateRandomIndicesPair(point_cloud);
 		//cout << "s: " << s.index1 << "AND" << s.index2 << endl;
 		//find the coefficients for the line
 		//equation of line passing through two points is given by(y1 - y2)*X + (x2 - x1)*Y + (x1*y2 - y1 * x2) = 0
-		A = point_cloud16[s.index1][1] - point_cloud16[s.index2][1];
-		B = point_cloud16[s.index2][0] - point_cloud16[s.index1][0];
-		C = point_cloud16[s.index1][0] * point_cloud16[s.index2][1] - point_cloud16[s.index1][1] * point_cloud16[s.index2][0];
+		A = point_cloud[s.index1].x - point_cloud[s.index2].y;
+		B = point_cloud[s.index2].x - point_cloud[s.index1].x;
+		C = point_cloud[s.index1].x * point_cloud[s.index2].y - point_cloud[s.index1].y * point_cloud[s.index2].x;
 	
-
+	/*	A = 2.2;
+		B = 0.55;
+		C = 8.7;*/
 		//find the count of points lying within tolerance of this line
 		int inlierscount = 0;
-		for (size_t i = 0; i < point_cloud16.size(); i++)
+
+		//#pragma omp parallel for
+		for (size_t i = 0; i < point_cloud.size(); i++)
 		{
 			//perpendicular distance of point x1, y1 from line Ax + By + C = 0 is | Ax1 + By1 + C|/sqrt(A ^ 2 + B ^ 2)
-			dist = abs(A*point_cloud16[i][0] + B * point_cloud16[i][1] + C) / (pow(A*A + B * B, 0.5));
+			dist = abs(A*point_cloud[i].x + B * point_cloud[i].y + C) / (pow(A*A + B * B, 0.5));
 			if (dist < tolerance)
 			{
 				inlierscount += 1;
@@ -545,27 +577,28 @@ void Mesh3DScene::Task1b()
 		
 	}
 	
-	for (size_t i = 0; i < point_cloud16.size(); i++) 
+	for (size_t i = 0; i < point_cloud.size(); i++)
 	{
 		A = coefficients[0];
 		B = coefficients[1];
 		C = coefficients[2];
 	}
-		
-	for (int p = 0; p < point_cloud16.size(); p++) {
-		allXvalues = point_cloud16[p];
+	
+	// CHEEEECK
+	for (int p = 0; p < point_cloud.size(); p++) {
+		allXvalues = point_cloud[p];
 	}
 
 	double minimumVal, maximumVal;
 	minimumVal = 0;
 	maximumVal = minimumVal;
 
-	for (int p = 0; p < point_cloud16.size(); p++) {
-		if (point_cloud16[p][0] < minimumVal) {
-			minimumVal = point_cloud16[p][0];
+	for (int p = 0; p < point_cloud.size(); p++) {
+		if (point_cloud[p].x < minimumVal) {
+			minimumVal = point_cloud[p].x;
 		}
-		if (point_cloud16[p][0] > maximumVal) {
-			maximumVal = point_cloud16[p][0];
+		if (point_cloud[p].x > maximumVal) {
+			maximumVal = point_cloud[p].x;
 		}
 	}
 	
@@ -579,9 +612,9 @@ void Mesh3DScene::Task1b()
 	yValues[1] = (-C - A * xValues[1]) / B;
 
 
-	cout << "xValues:" << xValues[0] << " AND " << xValues[1] << endl;
+	/*cout << "xValues:" << xValues[0] << " AND " << xValues[1] << endl;
 	cout << "yValues:" << yValues[0] << " AND " << yValues[1] << endl;
-
+*/
 
 	double minXValues, maxXValues, minYValues, maxYValues, minZValues, maxZValues;
 
@@ -594,14 +627,14 @@ void Mesh3DScene::Task1b()
 	minZValues = 0;
 	maxZValues = minZValues;
 
-	for (size_t i = 0; i < point_cloud16.size(); i++)
+	for (size_t i = 0; i < point_cloud.size(); i++)
 	{
-		allXvalues.x = point_cloud16[0].x;
-		allXvalues.y = point_cloud16[0].y;
-		allXvalues.z = point_cloud16[0].z;
+		allXvalues.x = point_cloud[0].x;
+		allXvalues.y = point_cloud[0].y;
+		allXvalues.z = point_cloud[0].z;
 	}
 	//min max for x
-	for (size_t i = 0; i < point_cloud16.size(); i++)
+	for (size_t i = 0; i < point_cloud.size(); i++)
 	{
 		if (allXvalues.x < minXValues) {
 			minXValues = allXvalues.x;
@@ -611,7 +644,7 @@ void Mesh3DScene::Task1b()
 		}
 	}
 	//min max for y
-	for (size_t i = 0; i < point_cloud16.size(); i++)
+	for (size_t i = 0; i < point_cloud.size(); i++)
 	{
 		if (allXvalues.y < minYValues) {
 			minYValues = allXvalues.y;
@@ -621,7 +654,7 @@ void Mesh3DScene::Task1b()
 		}
 	}
 	//min max for Z
-	for (size_t i = 0; i < point_cloud16.size(); i++)
+	for (size_t i = 0; i < point_cloud.size(); i++)
 	{
 		if (allXvalues.z < minZValues) {
 			minZValues = allXvalues.z;
@@ -649,9 +682,12 @@ void Mesh3DScene::Task1b()
 	zValues[0] = (-C - A * zValues[0]) / B;
 	zValues[1] = (-C - A * zValues[1]) / B;
 	
+
+	int64_t end = cv::getTickCount();
+	std::cout << "Task1b took: " << (end - start) / (cv::getTickFrequency()) * 1000.0 << " ms." << std::endl;
 }
 
-void Mesh3DScene::Task2a()
+void Mesh3DScene::Task2a(int pointCloudSize)
 {
 	//Implementation of K-Means for unlabeled data
 	/* https://github.com/aditya1601/kmeans-clustering-cpp/blob/master/kmeans.cpp
@@ -664,6 +700,97 @@ void Mesh3DScene::Task2a()
 	7. Implement PARALLEL code with  #pragma omp parallel for reduction(&&: done) num_threads(16) or similarly
 	*/
 
+
+	int64_t start = cv::getTickCount();
+
+	int i1, i2, i3, t1, t2;
+
+	//array of clusters, dynamically allocated - "malloc"
+
+	int* cluster0 = new int[pointCloudSize];
+	int* cluster1 = new int[pointCloudSize];
+	int* cluster2 = new int[pointCloudSize];
+	
+
+	
+	//initial means
+	int m1;
+	int m2;
+
+
+	int om1, om2;    //old means
+
+	do
+	{
+
+		//saving old means
+		om1 = m1;
+		om2 = m2;
+
+		//creating clusters
+		i1 = i2 = i3 = 0;
+		for (i1 = 0; i1 < pointCloudSize; i1++)
+		{
+			//calculating distance to means
+			t1 = cluster0[i1] - m1;
+			if (t1 < 0) { t1 = -t1; }
+
+			t2 = cluster0[i1] - m2;
+			if (t2 < 0) { t2 = -t2; }
+
+			if (t1 < t2)
+			{
+				//near to first mean
+				cluster1[i2] = cluster0[i1];
+				i2++;
+			}
+			else
+			{
+				//near to second mean
+				cluster2[i3] = cluster0[i1];
+				i3++;
+			}
+
+		}
+
+		t2 = 0;
+		//calculating new mean
+		for (t1 = 0; t1 < i2; t1++)
+		{
+			t2 = t2 + cluster1[t1];
+		}
+		m1 = t2 / i2;
+
+		t2 = 0;
+		for (t1 = 0; t1 < i3; t1++)
+		{
+			t2 = t2 + cluster2[t1];
+		}
+		m2 = t2 / i3;
+
+		//printing clusters
+		cout << "\nCluster 1:";
+		for (t1 = 0; t1 < i2; t1++)
+		{
+			cout << cluster1[t1] << " ";
+		}
+		cout << "\nm1=" << m1;
+
+		cout << "\nCluster 2:";
+		for (t1 = 0; t1 < i3; t1++)
+		{
+			cout << cluster2[t1] << " ";
+		}
+		cout << "\nm2=" << m2;
+
+		cout << "\n ----";
+	} while (m1 != om1 && m2 != om2);
+
+	cout << "\n Clusters created";
+
+	int64_t end = cv::getTickCount();
+	std::cout << "Task2a took: " << (end - start) / (cv::getTickFrequency()) * 1000.0 << " ms." << std::endl;
+	
 }
 
 double Mesh3DScene::findMin(double a, double b)
@@ -689,17 +816,7 @@ double Mesh3DScene::findMax(double a, double b)
 }
 
 
-randomIndices Mesh3DScene::generateRandomIndicesPair() {
-	
-	randomIndices s;
-	s.index1 = rand() % (point_cloud16.size() - 1);
-	s.index2 = rand() % (point_cloud16.size() - 1);
-	while (s.index1 == s.index2) {
-		s.index2 = rand() % (point_cloud16.size() - 1);
-	}
 
-	return s;
-}
 
 void Mesh3DScene::reset()
 {
@@ -707,10 +824,10 @@ void Mesh3DScene::reset()
 
 	//! Define plane
 	m_plane_d = 0;
-	m_plane = Plane(vec(0, 1, 1).Normalized(), m_plane_d);
+	/*m_plane = Plane(vec(0, 1, 1).Normalized(), m_plane_d);*/
 
 	//! Define what will be vissible by default
-	m_style_flag = 0;
+	m_style_flag = 0x0;
 	m_style_flag |= FLAG_SHOW_SOLID;
 	m_style_flag |= FLAG_SHOW_WIRE;
 	m_style_flag |= FLAG_SHOW_CANVAS;
@@ -718,6 +835,16 @@ void Mesh3DScene::reset()
 	m_style_flag |= FLAG_SHOW_PLANE;
 	
 
+	m_flag |= FLAG(SHOW_NN);
+	m_flag |= FLAG(SHOW_PTS_KDTREE);
+	m_flag |= FLAG(SHOW_KDTREE);
+	m_flag |= FLAG(SHOW_PTS_ALL);
+	m_flag |= FLAG(SHOW_PTS_IN_SPHERE);
+	m_flag |= FLAG(BRUTEFORCE);
+	m_flag |= FLAG(SHOW_TIME);
+	m_flag |= FLAG(FLAG_1A);
+	m_flag |= FLAG(FLAG_1B);
+	m_flag |= FLAG(FLAG_2A);
 	//for working with canvas and triangulization process
 	m_canvas.clear();
 	m_triangles.clear();
@@ -738,20 +865,12 @@ void Mesh3DScene::reset()
 	m_current_tree_level = 0;*/
 
 	//! Position camera
-	//auto pos = getFrustum().Pos();
-	//pos.y += 20;
-	//pos.z -= 40;
-	//setCameraPos(pos);
+	auto pos = getFrustum().Pos();
+	pos.y += 20;
+	pos.z -= 40;
+	setCameraPos(pos);
 
-	//! Define what will be vissible by default
-	//m_flag = 0;
-	//m_flag |= FLAG(SHOW_NN);
-	//m_flag |= FLAG(SHOW_PTS_KDTREE);
-	//m_flag |= FLAG(SHOW_KDTREE);
-	//m_flag |= FLAG(SHOW_PTS_ALL);
-	//m_flag |= FLAG(SHOW_PTS_IN_SPHERE);
-	//m_flag |= FLAG(BRUTEFORCE);
-	//m_flag |= FLAG(SHOW_TIME);
+	
 
 	//! Define scene objects
 	//m_sphere = vvr::Sphere3D(-GND_WIDTH / 2, 0, 0, SPHERE_RAD, vvr::Colour::white);
@@ -759,7 +878,7 @@ void Mesh3DScene::reset()
 	//! Create random points
 	const float mw = getSceneWidth() * 0.3;
 	const float mh = getSceneHeight() * 0.3;
-	const float mz = std::min(mw, mh);
+	const float mz = min(mw, mh);
 
 	//if (FLAG_ON(m_flag, POINTS_ON_SURFACE)) {
 	//	createSurfacePts(m_pts.empty() ? NUM_PTS_DEFAULT : m_pts.size());
@@ -817,7 +936,6 @@ void Mesh3DScene::printKeyboardShortcuts()
 {
 	std::cout << "Keyboard shortcuts:"
 		<< std::endl << "'?' => This shortcut list:"
-		<< std::endl << "'b' => Task1b"
 		<< std::endl << "'n' => SHOW_NN"
 		<< std::endl << "'k' => SHOW_KNN"
 		<< std::endl << "'f' => SHOW_FPS"
@@ -828,6 +946,11 @@ void Mesh3DScene::printKeyboardShortcuts()
 		<< std::endl << "'d' => SHOW_PTS_KDTREE"
 		<< std::endl << "'c' => SHOW_PTS_IN_SPHERE"
 		<< std::endl << "'u' => POINTS_ON_SURFACE"
+		<< std::endl << "'q' => DRAWING CANVAS"
+
+		<< std::endl << "'g' => Task1a"
+		<< std::endl << "'h' => Task1b"
+		<< std::endl << "'j' => Task2a"
 		<< std::endl << std::endl;
 }
 
@@ -881,10 +1004,15 @@ void Mesh3DScene::keyEvent(unsigned char key, bool up, int modif)
 	
 	case 'p': m_style_flag ^= FLAG_SHOW_PLANE; break;
 	//case 'b': m_style_flag ^= FLAG_SHOW_AABB; break;
-	case 'a': Task1a();  break;
-	case 'b': Task1b();  break;
+	
+	
 	case 'q': load_point_cloud_comparison();  break;
-
+	case 'g': Task1a();  break;
+	//case 'h': Task1b(pointCloudSize,pointCloud);  break;
+		//toggle is recursive - repeating --> NO
+		/*FLAG_TOGGLE(m_flag, 'g', FLAG_1A);
+		FLAG_TOGGLE(m_flag, 'h', FLAG_1B);
+		FLAG_TOGGLE(m_flag, 'j', FLAG_2A);*/
 		//FLAG_TOGGLE(m_flag, 'b', BRUTEFORCE);
 		//FLAG_TOGGLE(m_flag, 'n', SHOW_NN);
 		//FLAG_TOGGLE(m_flag, 'k', SHOW_KNN);
@@ -919,14 +1047,16 @@ void Mesh3DScene::Tasks()
 {
 
 
-	//load_point_cloud_comparison();
-	/*Task_3_TriangulateMesh(m_vertices, m_model);
-	if (!levels_calculated) {
+	load_point_cloud_comparison();
+	//Task1a();
+	//Task_3_TriangulateMesh(m_vertices, m_model);
+	/*if (!levels_calculated) {
 		if (REGION_GROWING) Task_4_DivideLayers_RR(m_vertices, v_all_levels);
 		else Task_4_DivideLayers(m_model, &all_levels);
 	}*/
-	/*Task1a();
-	Task1b();*/
+	
+	
+	//Task1b();
 	
 	//processPoint();
 
@@ -1082,26 +1212,48 @@ void Mesh3DScene::draw()
 	//! Draw triangles
 	Shape::DEF_LINE_WIDTH = m_lw_tris;
 
+
+	int pointCloudSize16 = point_cloud16.size();
+	int pointCloudSize20 = point_cloud20.size();
+
+
+	/*if (m_style_flag & FLAG_1A) {
+
+		Task1a();
+		
+	}*/
+
+
+	//if (FLAG_ON(m_flag, FLAG_1B)) {
+	//	//do the same for both point_clouds
+
+	//	Task1b(pointCloudSize16, point_cloud16);
+	//	Task1b(pointCloudSize20, point_cloud20);
+
+
+	//}
+
+	//if (FLAG_ON(m_style_flag, FLAG_2A)) {
+
+	//	Task2a(pointCloudSize16);
+	//	Task2a(pointCloudSize20);
+
+	//}
+
+
+
 	//for triangulization - need to adjust
-	/*vector<Tri>::const_iterator tri_iter;
+	vector<Tri>::const_iterator tri_iter;
 	for (tri_iter = m_triangles.begin(); tri_iter != m_triangles.end(); ++tri_iter) {
 		tri_iter->to_vvr().draw();
 	}
-*/
-	////! Draw any point
-	//Shape::DEF_POINT_SIZE = m_sz_pt;
-	//for (int i = 0; i < m_pts.size(); i++) {
-	//	Point3D(m_pts[i].x, m_pts[i].y, m_pts[i].z, Colour::yellow).draw();
-	//}
 
 
-	////! Draw point clouds
-	//for (int i = 0; i < point_cloud16.size(); i++) {
-	//	Point3D(point_cloud16[i].x, point_cloud16[i].y, point_cloud16[i].z, vvr::Colour::blue).draw();
-	//}
-	//for (int i = 0; i < point_cloud20.size(); i++) {
-	//	Point3D(point_cloud20[i].x, point_cloud20[i].y, point_cloud20[i].z, vvr::Colour::darkRed).draw();
-	//}
+
+
+
+
+
 	
 	
 
@@ -1155,7 +1307,147 @@ void Mesh3DScene::draw()
 	if (m_style_flag & FLAG_SHOW_WIRE) m_model.draw(Colour::black, WIRE);
 	if (m_style_flag & FLAG_SHOW_NORMALS) m_model.draw(Colour::black, NORMALS);
 	
-	Task1a()) m_model.draw(Colour::black, AXES);
+	
+	//! Draw points
+	//if (FLAG_ON(m_flag, SHOW_PTS_ALL)) {
+	//	for (size_t i = 0; i < m_pts.size(); i++) {
+	//		vvr::Shape::DEF_POINT_SIZE = vvr::Shape::DEF_POINT_SIZE = POINT_SIZE;
+	//		math2vvr(m_pts[i], vvr::Colour::white).draw();
+	//		vvr::Shape::DEF_POINT_SIZE = POINT_SIZE_SAVE;
+	//	}
+	//}
+
+	
+	// set some variables for measuring execution time of a function when it runs 1000 iterations
+	static int counter{ 0 };
+	static long sumDuration{ 0 };
+
+	//! Draw points in sphere
+
+	//if (FLAG_ON(m_flag, SHOW_PTS_IN_SPHERE)) {
+	//	if (FLAG_ON(m_flag, SHOW_SPHERE)) {
+	//		sphere_moved.draw();
+	//	}
+	//	VecArray pts_in;
+	//	if (FLAG_ON(m_flag, BRUTEFORCE)) {
+	//		counter++;
+	//		auto startBruteOn = high_resolution_clock::now();
+	//		for (auto pt : m_KDTree->pts)
+	//			if (sphere.Contains(pt)) pts_in.push_back(pt);
+	//		auto stopBruteOn = high_resolution_clock::now();
+	//		auto durationOn = duration_cast<microseconds>(stopBruteOn - startBruteOn);
+	//		sumDuration += durationOn.count();
+	//	}
+	//	else {
+	//		counter++;
+	//		auto startBruteOff = high_resolution_clock::now();
+	//		Task_03_InSphere(sphere, m_KDTree->root(), pts_in);
+	//		auto stopBruteOff = high_resolution_clock::now();
+	//		auto durationOff = duration_cast<microseconds>(stopBruteOff - startBruteOff);
+	//		sumDuration += durationOff.count();
+	//	}
+	//	// show time execution of 1000 iterations
+	//	if ((FLAG_ON(m_flag, SHOW_TIME)) && counter > 1000) {
+	//		auto res = sumDuration / 1000;
+	//		echo(res);
+	//		counter = 0;
+	//		sumDuration = 0;
+	//	}
+	//	vvr::Shape::DEF_POINT_SIZE = vvr::Shape::DEF_POINT_SIZE = POINT_SIZE;
+	//	for (auto i : pts_in) {
+	//		math2vvr(i, vvr::Colour::magenta).draw();
+	//	}
+	//	vvr::Shape::DEF_POINT_SIZE = POINT_SIZE_SAVE;
+	//}
+
+	//! Find and Draw Nearest Neighbour
+
+	//if (FLAG_ON(m_flag, SHOW_NN)) {
+	//	float dist;
+	//	const KDNode *nearest = NULL;
+
+	//	Task_02_Nearest(sc, m_KDTree->root(), &nearest, &dist);
+
+	//	vec nn = nearest->split_point;
+	//	vvr::Shape::DEF_POINT_SIZE = vvr::Shape::DEF_POINT_SIZE = POINT_SIZE;
+	//	math2vvr(sc, vvr::Colour::blue).draw();
+	//	math2vvr(nn, vvr::Colour::green).draw();
+	//	vvr::Shape::DEF_POINT_SIZE = POINT_SIZE_SAVE;
+	//}
+
+	//! Find and Draw K Nearest Neighbour using bruteforce
+	/*if (FLAG_ON(m_flag, SHOW_KNN) && FLAG_ON(m_flag, BRUTEFORCE)) {
+		vec *nearests = new vec[m_KDTree->pts.size()];
+		double* allDistances = new double[m_KDTree->pts.size()];
+		memset(nearests, NULL, m_KDTree->pts.size() * sizeof(vec));
+
+		for (int i = 0; i < m_KDTree->pts.size(); i++) {
+			*(nearests + i) = m_KDTree->pts[i];
+			allDistances[i] = sc.Distance(m_KDTree->pts[i]);
+		}
+
+		int *indices = new int[m_KDTree->pts.size()];
+		for (int i = 0; i < m_KDTree->pts.size(); i++) {
+			*(indices + i) = i;
+		}
+		std::sort(indices, indices + m_KDTree->pts.size(), compare(allDistances));
+		for (int i = 0; i < m_kn; i++) {
+			vec nn = m_KDTree->pts[*(indices + i)];
+			vvr::Shape::DEF_POINT_SIZE = vvr::Shape::DEF_POINT_SIZE = POINT_SIZE;
+			math2vvr(sc, vvr::Colour::blue).draw();
+			math2vvr(nn, vvr::Colour::green).draw();
+			vvr::Shape::DEF_POINT_SIZE = POINT_SIZE_SAVE;
+		}
+
+		delete[] nearests;
+		delete[] indices;
+	}
+*/
+	//! Find and Draw K Nearest Neighbour using recursion
+	/*if (FLAG_ON(m_flag, SHOW_KNN) && !FLAG_ON(m_flag, BRUTEFORCE)) {
+		float dist;
+		const KDNode **nearests = new const KDNode*[m_kn];
+		memset(nearests, NULL, m_kn * sizeof(KDNode*));
+
+		for (int i = 0; i < m_kn; i++) {
+			Task_04_NearestK(i, sc, m_KDTree->root(), nearests, &dist);
+		}
+
+		for (int i = 0; i < m_kn; i++) {
+			if (!nearests[i]) continue;
+			vec nn = nearests[i]->split_point;
+			vvr::Shape::DEF_POINT_SIZE = vvr::Shape::DEF_POINT_SIZE = POINT_SIZE;
+			math2vvr(sc, vvr::Colour::blue).draw();
+			math2vvr(nn, vvr::Colour::green).draw();
+			vvr::Shape::DEF_POINT_SIZE = POINT_SIZE_SAVE;
+		}
+		delete[] nearests;
+	}
+*/
+	//! Draw KDTree
+	/*if (FLAG_ON(m_flag, SHOW_KDTREE)) {
+		for (int level = m_current_tree_level; level <= m_current_tree_level; level++) {
+			std::vector<KDNode*> levelNodes = m_KDTree->getNodesOfLevel(level);
+			for (int i = 0; i < levelNodes.size(); i++) {
+				if (m_flag & FLAG(SHOW_PTS_KDTREE)) {
+					VecArray pts;
+					Task_01_FindPtsOfNode(levelNodes[i], pts);
+					vvr::Shape::DEF_POINT_SIZE = vvr::Shape::DEF_POINT_SIZE = POINT_SIZE;
+					for (int pi = 0; pi < pts.size(); pi++) {
+						math2vvr(pts[pi], Pallete[i % 6]).draw();
+					}
+					vvr::Shape::DEF_POINT_SIZE = POINT_SIZE_SAVE;
+				}
+				vec c1 = levelNodes[i]->aabb.minPoint - math::vec(0.1);
+				vec c2 = levelNodes[i]->aabb.maxPoint + math::vec(0.1);
+				vvr::Box3D box(c1.x, c1.y, c1.z, c2.x, c2.y, c2.z);
+				box.setTransparency(0.9);
+				box.setColour(vvr::Colour::cyan);
+				box.draw();
+			}
+		}
+	}
+	*/
 
 	//from lab5
 	//! Find and Draw Nearest Neighbour
@@ -1266,6 +1558,27 @@ void Mesh3DScene::draw()
 	//	last_show = sec;
 	//}
 
+}
+
+
+
+
+
+randomIndices Mesh3DScene::generateRandomIndicesPair(std::vector<vec> point_cloud)
+{
+
+	
+	randomIndices s;
+	s.index1 = rand() % (point_cloud.size() - 1);
+	s.index2 = rand() % (point_cloud.size() - 1);
+	while (s.index1 == s.index2) {
+		s.index2 = rand() % (point_cloud.size() - 1);
+	}
+
+	return s;
+
+
+	
 }
  
 ////! KDTree::
@@ -1422,7 +1735,7 @@ void Mesh3DScene::draw()
 //	return nodes;
 //}
 
-//
+////
 //void Task_3_TriangulateMesh(const std::vector<vec>& vertices, vvr::Mesh*& mesh)
 //{
 //	//!//////////////////////////////////////////////////////////////////////////////////
@@ -1463,7 +1776,8 @@ void Mesh3DScene::draw()
 //		}
 //	}
 //}
-//
+////
+
 //bool valid(vec v) {
 //	if ((isnormal(v.x) || v.x == 0) && (isnormal(v.y) || v.y == 0) && (isnormal(v.z) || v.z == 0.0)) return true;
 //}

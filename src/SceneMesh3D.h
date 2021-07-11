@@ -18,8 +18,10 @@
 #include "canvas.h"
 #include <ctime>
 #include <algorithm>
+//OpenCV library
+#include <opencv2/opencv.hpp>
 
-//Needed, but where? From lab 6
+//Eigen Library
 #include "Eigen/Dense"
 #include "Eigen/Sparse"
 #include "Eigen/SparseQR"
@@ -31,7 +33,7 @@
 #define FLAG(x) (1<<(x))
 #define FLAG_ON(v,f) (v & FLAG(f))
 #define FLAG_TOGGLE(v,c,f) case c: v ^= FLAG(f); std::cout \
-    << #f << " = " << (FLAG_ON(v,f) ? "ON" : "OFF") \
+    << #f << " = " << (FLAG_ON(v,f) ? "OFF" : "ON") \
     << std::endl; break
 
 
@@ -52,6 +54,8 @@ static const vvr::Colour Pallete[11] = {
 	vvr::Colour::darkGreen,vvr::Colour::darkOrange,vvr::Colour::darkRed,
 	vvr::Colour::white, vvr::Colour::cyan,
 };
+
+
 
 
 
@@ -140,7 +144,7 @@ class Mesh3DScene : public vvr::Scene
 	enum {
 		BRUTEFORCE, POINTS_ON_SURFACE, SHOW_AXES, SHOW_FPS, SHOW_NN, SHOW_KNN, SHOW_SPHERE,
 		SHOW_KDTREE, SHOW_PTS_ALL, SHOW_PTS_KDTREE,
-		SHOW_PTS_IN_SPHERE, SHOW_TIME
+		SHOW_PTS_IN_SPHERE, SHOW_TIME, FLAG_1A, FLAG_1B, FLAG_2A,
 	};
 
 
@@ -154,19 +158,19 @@ public:
 	int bm_num_disparities = 3; int bm_num_disparities_max = 10; //*16
 	int bm_uniqueness = 0;	int bm_uniqueness_max = 100;
 
-
-
+	
 	//Stereo Matrices
-	//Mat image2016;
-	//Mat image2020;
-	//Mat trueDisp;
-	//Mat disp;
-	//Mat disp8; //8-bit disparity to display
+	cv::Mat image2016;
+	cv::Mat image2020;
+	cv::Mat trueDisp;
+	cv::Mat disp;
+	cv::Mat disp8; //8-bit disparity to display
+	
 
-	////Stereo to 3D params  ( Z = f(B/d) ) (f = ResX / (2 * tan(FOV/2.0) ) (X = (V-Vc) * (Z/f))
-	//float stereo_baseline = 0.2; // 20cm
-	//float fieldOfView = 1.2; // rad
-	//float focal_length_constant = 1.0f / (2.0f * tan(fieldOfView / 2.0f));
+	//Stereo to 3D params  ( Z = f(B/d) ) (f = ResX / (2 * tan(FOV/2.0) ) (X = (V-Vc) * (Z/f))
+	float stereo_baseline = 0.2f; // 20cm
+	float fieldOfView = 1.2f; // rad
+	float focal_length_constant = 1.0f / (2.0f * tan(fieldOfView / 2.0f));
 
 
 public:
@@ -179,14 +183,21 @@ public:
 
 	void load_point_cloud_comparison();
 	void Task1a();
-	void Task1b();
-	void Task2a();
+	void Task1b(int pointCloudSize, std::vector<vec> point_cloud);
+	//void Task1b(int pointCloudSize, std::array point_cloud);
+	void Task2a(int pointCloudSize);
+
+
+	
 
 	double findMin(double a, double b);
 	double findMax(double a, double b);
 
 private:
 	void draw() override;
+
+	randomIndices generateRandomIndicesPair(std::vector<vec> point_cloud);
+
 	void reset() override;
 	void resize() override;
 	//void drawCompare();
@@ -205,7 +216,10 @@ private:
 	math::vec m_pca_dir;
 	math::Plane m_plane; 
 	std::vector<int> m_intersections;
+	
+
 	std::vector<vec> point_cloud, point_cloud16, point_cloud20;
+
 	int subfoldersIndex, fileIndex;
 	math::float3 allXvalues;
 	double xValues[2], yValues[2], zValues[2];
@@ -235,7 +249,7 @@ private:
 	void processPoint();
 	void readUserInput();
 
-	randomIndices generateRandomIndicesPair();
+	
 
 private:
 	
@@ -252,6 +266,14 @@ private:
 struct randomIndices {
 	int index1, index2;
 };
+
+template<typename S>
+auto selectRandom(const S &s, size_t n) {
+	auto it = std::begin(s);
+	// 'advance' the iterator n times
+	std::advance(it, n);
+	return it;
+}
 
 /**
 * Struct representing a triangle with pointers to its 3 vertices
